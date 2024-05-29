@@ -1,6 +1,7 @@
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.StorageLevels;
+import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.streaming.Durations;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import scala.Tuple2;
@@ -74,9 +75,11 @@ public class G008HW3 {
 
         long[] streamLength = new long[1]; // Stream length (an array to be passed by reference)
         streamLength[0] = 0L;
-        ArrayList<ArrayList<Tuple2<Long, Long>>> trueFrequentItems = new ArrayList<>(); // True Frequent Items
-        ArrayList<ArrayList<Long>> reservoirSampling = new ArrayList<>(); // Reservoir Sampling
-        ArrayList<Hashtable<Long, Long>> stickySampling = new ArrayList<>(); // epsilon-AFI with Sticky Sampling
+        //array of a JavaPairRDD<Long, Long> to store the stream of items
+        JavaPairRDD<Long, Long>[] fullStream = new JavaPairRDD[1];
+        ArrayList<Tuple2<Long, Long>> trueFrequentItems = new ArrayList<>(); // True Frequent Items
+        ArrayList<Long> reservoirSampling = new ArrayList<>(); // Reservoir Sampling
+        Hashtable<Long, Long> stickySampling = new Hashtable<>(); // epsilon-AFI with Sticky Sampling
         // HashMap<Long, Long> histogram = new HashMap<>(); // Hash Table for the distinct elements
 
         // CODE TO PROCESS AN UNBOUNDED STREAM OF DATA IN BATCHES
@@ -91,19 +94,21 @@ public class G008HW3 {
                         streamLength[0] += batchSize;
                         JavaPairRDD<Long, Long> batchItems = batch
                                 .mapToPair(s -> new Tuple2<>(Long.parseLong(s), 1L))
-                                .reduceByKey(Long::sum);
+                                .persist(StorageLevel.MEMORY_AND_DISK());
 
-                        // True Frequent Items
-                        if(batchSize > 0) {
-                            trueFrequentItems.add(new ArrayList<>(trueFrequentItems(batchItems, phi, batchSize)));
-                            reservoirSampling.add(new ArrayList<>(reservoirSampling(batchItems, phi)));
-                            stickySampling.add(new Hashtable<>(stickySampling(batchItems, epsilon, delta, phi, batchSize)));
+                        // Add batch to the full stream
+                        if (fullStream[0] == null) {
+                            fullStream[0] = batchItems.persist(StorageLevel.MEMORY_AND_DISK());
+                        } else {
+                            fullStream[0] = fullStream[0].union(batchItems).persist(StorageLevel.MEMORY_AND_DISK());
                         }
+
+                        fullStream[0].count(); // Force the computation of the full stream to synchronize the operations
 
                         // If we wanted, here we could run some additional code on the global histogram
-                        if (batchSize > 0) {
+                      /*  if (batchSize > 0) {
                             System.out.println("Batch size at time [" + time + "] is: " + batchSize);
-                        }
+                        }*/
                         if (streamLength[0] >= n) {
                             stoppingSemaphore.release();
                         }
@@ -111,43 +116,58 @@ public class G008HW3 {
                 });
 
         // MANAGING STREAMING SPARK CONTEXT
-        System.out.println("Starting streaming engine");
+
+        //System.out.println("Starting streaming engine");
         sc.start();
-        System.out.println("Waiting for shutdown condition");
+        //System.out.println("Waiting for shutdown condition");
         stoppingSemaphore.acquire();
-        System.out.println("Stopping the streaming engine");
+        //System.out.println("Stopping the streaming engine");
 
         // IMPLEMENTING THE ALGORITHMS
+
+        trueFrequentItems = trueFrequentItems(fullStream[0], phi, streamLength[0]);
+        reservoirSampling = reservoirSampling(fullStream[0], phi);
+        stickySampling = stickySampling(fullStream[0], epsilon, delta, phi, streamLength[0]);
+
+
+
+        //TODO: ask if we have to print unique items or all in trueFrequentItems
         // True Frequent Items with the threshold phi
-        for(ArrayList<Tuple2<Long, Long>> tfi : trueFrequentItems) {
-            tfi.sort(Comparator.comparingLong(Tuple2::_2));
-            System.out.println("Number of true frequent items = " + tfi.size());
-            System.out.println("True Frequent Items = " + tfi);
+        trueFrequentItems.sort(Comparator.comparingLong(Tuple2::_2));
+        System.out.println("Number of true frequent items = " + trueFrequentItems.size());
+        System.out.println("True Frequent Items:");
+        for(Tuple2<Long, Long> item : trueFrequentItems) {
+            System.out.println(item._1());
         }
 
+
         // Reservoir Sampling
-        for(ArrayList<Long> rs : reservoirSampling) {
-            rs.sort(Comparator.comparingLong(Long::longValue));
-            System.out.println("Reservoir Sampling = " + rs);
+        reservoirSampling.sort(Comparator.comparingLong(Long::longValue));
+        System.out.println("Reservoir Sampling:");
+        for(Long item : reservoirSampling) {
+            System.out.println(item);
         }
+
+
         // epsilon-AFI computed with Sticky Sampling
-        for(Hashtable<Long, Long> ss : stickySampling) {
-            // sort hashtable by increasing value
-            ArrayList<Tuple2<Long, Long>> l = new ArrayList<>();
-            ss.forEach((k, v) -> l.add(new Tuple2<>(k, v)));
-            l.sort(Comparator.comparingLong(Tuple2::_2));
-            System.out.println("Number of sticky sampling items = " + l.size());
-            System.out.println("Sticky Sampling Items = " + l);
-        }
+        // sort hashtable by increasing value
+        ArrayList<Tuple2<Long, Long>> l = new ArrayList<>();
+        stickySampling.forEach((k, v) -> l.add(new Tuple2<>(k, v)));
+        l.sort(Comparator.comparingLong(Tuple2::_2));
+        System.out.println("Number of sticky sampling items = " + l.size());
+        System.out.println("Sticky Sampling Items:");
+        for(Tuple2<Long, Long> item : l)
+            System.out.println(item._1());
+
         // NOTE: You will see some data being processed even after the
         // shutdown command has been issued: This is because we are asking
         // to stop "gracefully", meaning that any outstanding work
         // will be done.
         sc.stop(false, false);
-        System.out.println("Streaming engine stopped");
+        //System.out.println("Streaming engine stopped");
 
         // COMPUTE AND PRINT FINAL STATISTICS
-        System.out.println("Number of items processed = " + streamLength[0]);
+        //System.out.println("Number of items processed = " + streamLength[0]);
         // System.out.println("Number of distinct items = " + histogram.size());
         /*System.out.println("Histogram = " + histogram);
         long max = 0L;
