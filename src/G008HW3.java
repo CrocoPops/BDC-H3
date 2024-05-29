@@ -7,8 +7,6 @@ import scala.Tuple2;
 
 import java.util.*;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLongArray;
 
 public class G008HW3 {
 
@@ -78,6 +76,7 @@ public class G008HW3 {
         streamLength[0] = 0L;
         ArrayList<ArrayList<Tuple2<Long, Long>>> trueFrequentItems = new ArrayList<>(); // True Frequent Items
         ArrayList<ArrayList<Long>> reservoirSampling = new ArrayList<>(); // Reservoir Sampling
+        ArrayList<Hashtable<Long, Long>> stickySampling = new ArrayList<>(); // epsilon-AFI with Sticky Sampling
         // HashMap<Long, Long> histogram = new HashMap<>(); // Hash Table for the distinct elements
 
         // CODE TO PROCESS AN UNBOUNDED STREAM OF DATA IN BATCHES
@@ -98,6 +97,7 @@ public class G008HW3 {
                         if(batchSize > 0) {
                             trueFrequentItems.add(new ArrayList<>(trueFrequentItems(batchItems, phi, batchSize)));
                             reservoirSampling.add(new ArrayList<>(reservoirSampling(batchItems, phi)));
+                            stickySampling.add(new Hashtable<>(stickySampling(batchItems, epsilon, delta, phi, batchSize)));
                         }
 
                         // If we wanted, here we could run some additional code on the global histogram
@@ -131,7 +131,14 @@ public class G008HW3 {
             System.out.println("Reservoir Sampling = " + rs);
         }
         // epsilon-AFI computed with Sticky Sampling
-        // TODO: implement epsilon-AFI with Sticky Sampling
+        for(Hashtable<Long, Long> ss : stickySampling) {
+            // sort hashtable by increasing value
+            ArrayList<Tuple2<Long, Long>> l = new ArrayList<>();
+            ss.forEach((k, v) -> l.add(new Tuple2<>(k, v)));
+            l.sort(Comparator.comparingLong(Tuple2::_2));
+            System.out.println("Number of sticky sampling items = " + l.size());
+            System.out.println("Sticky Sampling Items = " + l);
+        }
         // NOTE: You will see some data being processed even after the
         // shutdown command has been issued: This is because we are asking
         // to stop "gracefully", meaning that any outstanding work
@@ -191,6 +198,34 @@ public class G008HW3 {
             t++;
         }
         return reservoir;
+    }
+
+    /**
+     * epsilon-AFI with Sticky Sampling Algorithm
+     * @param stream - stream of items
+     * @param epsilon - accuracy parameter
+     * @param delta - confidence parameter
+     * @param phi - frequency threshold
+     * @param streamLength - length of the stream
+     * @return - hashtable of frequent items with (phi - epsilon) * streamLength probability
+     */
+    public static Hashtable<Long, Long> stickySampling(JavaPairRDD<Long, Long> stream, float epsilon, float delta, float phi, long streamLength) {
+        Hashtable<Long, Long> S = new Hashtable<>();
+        double r = Math.log(1 / (delta * phi)) / epsilon;
+        List<Tuple2<Long, Long>> elements = stream.collect();
+
+        for(Tuple2<Long, Long> el : elements) {
+            Random random = new Random();
+            if (S.containsKey(el._1()))
+                S.replace(el._1(), el._2(), el._2() + 1);
+            else
+                if(random.nextDouble() <= r / streamLength)
+                    S.put(el._1(), el._2());
+        }
+
+        // drop items with frequency less than (phi - epsilon) * streamLength
+        S.entrySet().removeIf(entry -> entry.getValue() < (phi - epsilon) * streamLength);
+        return S;
     }
 
 }
