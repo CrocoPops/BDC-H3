@@ -1,18 +1,14 @@
-import org.apache.hadoop.util.hash.Hash;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.StorageLevels;
 import org.apache.spark.streaming.Durations;
-import org.apache.spark.streaming.api.java.JavaPairDStream;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
-import scala.Array;
 import scala.Tuple2;
 
 import java.util.*;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.atomic.AtomicLongArray;
 
 public class G008HW3 {
 
@@ -28,7 +24,7 @@ public class G008HW3 {
         // code will crash with an out of memory (because the input keeps accumulating).
         SparkConf conf = new SparkConf(true)
                 .setMaster("local[*]") // remove this line if running on the cluster
-                .setAppName("DistinctExample");
+                .setAppName("G008HW3");
 
         // Here, with the duration you can control how large to make your batches.
         // Beware that the data generator we are using is very fast, so the suggestion
@@ -39,7 +35,7 @@ public class G008HW3 {
 
         // TECHNICAL DETAIL:
         // The streaming spark context and our code and the tasks that are spawned all
-        // work concurrently. To ensure a clean shut down we use this semaphore. The 
+        // work concurrently. To ensure a clean shut down we use this semaphore. The
         // main thread will first acquire the only permit available, and then it will try
         // to acquire another one right after spinning up the streaming computation.
         // The second attempt at acquiring the semaphore will make the main thread
@@ -55,11 +51,12 @@ public class G008HW3 {
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
         int n = Integer.parseInt(args[0]);
+        System.out.println("Number of items = " + n);
         float phi = Float.parseFloat(args[1]);
         if(phi <= 0 || phi >= 1) {
             throw new IllegalArgumentException("The phi parameter must be in the range (0, 1)");
         }
-        System.out.println("Number of items = " + n);
+        System.out.println("Phi = " + phi);
         float epsilon = Float.parseFloat(args[2]);
         if(epsilon <= 0 || epsilon >= 1) {
             throw new IllegalArgumentException("The epsilon parameter must be in the range (0, 1)");
@@ -80,6 +77,7 @@ public class G008HW3 {
         long[] streamLength = new long[1]; // Stream length (an array to be passed by reference)
         streamLength[0] = 0L;
         ArrayList<ArrayList<Tuple2<Long, Long>>> trueFrequentItems = new ArrayList<>(); // True Frequent Items
+        ArrayList<ArrayList<Long>> reservoirSampling = new ArrayList<>(); // Reservoir Sampling
         // HashMap<Long, Long> histogram = new HashMap<>(); // Hash Table for the distinct elements
 
         // CODE TO PROCESS AN UNBOUNDED STREAM OF DATA IN BATCHES
@@ -97,8 +95,10 @@ public class G008HW3 {
                                 .reduceByKey(Long::sum);
 
                         // True Frequent Items
-                        if(batchSize > 0)
+                        if(batchSize > 0) {
                             trueFrequentItems.add(new ArrayList<>(trueFrequentItems(batchItems, phi, batchSize)));
+                            reservoirSampling.add(new ArrayList<>(reservoirSampling(batchItems, phi)));
+                        }
 
                         // If we wanted, here we could run some additional code on the global histogram
                         if (batchSize > 0) {
@@ -121,12 +121,15 @@ public class G008HW3 {
         // True Frequent Items with the threshold phi
         for(ArrayList<Tuple2<Long, Long>> tfi : trueFrequentItems) {
             tfi.sort(Comparator.comparingLong(Tuple2::_2));
-            System.out.println("True Frequent Items = " + tfi);
             System.out.println("Number of true frequent items = " + tfi.size());
+            System.out.println("True Frequent Items = " + tfi);
         }
 
         // Reservoir Sampling
-        // TODO: implement reservoir sampling
+        for(ArrayList<Long> rs : reservoirSampling) {
+            rs.sort(Comparator.comparingLong(Long::longValue));
+            System.out.println("Reservoir Sampling = " + rs);
+        }
         // epsilon-AFI computed with Sticky Sampling
         // TODO: implement epsilon-AFI with Sticky Sampling
         // NOTE: You will see some data being processed even after the
@@ -161,6 +164,33 @@ public class G008HW3 {
                 .filter(s -> s._2 >= phi * streamLength);
         // Return the list of frequent items
         return new ArrayList<>(frequentItems.collect());
+    }
+
+    /**
+     * Reservoir Sampling Algorithm
+     * @param stream - stream of items
+     * @param phi - frequency threshold used to compute m
+     * @return - list of m-sampled items
+     */
+    public static ArrayList<Long> reservoirSampling(JavaPairRDD<Long, Long> stream, float phi) {
+        int m = (int) Math.ceil(1 / phi);
+        ArrayList<Long> reservoir = new ArrayList<>();
+        int t = 0;
+        List<Tuple2<Long, Long>> elements = stream.collect();
+
+        for(Tuple2<Long, Long> el : elements) {
+            if (reservoir.size() < m) {
+                reservoir.add(el._1);
+            } else {
+                Random random = new Random();
+                if (random.nextFloat() <= (float) m / t) {
+                    int i = random.nextInt(m);
+                    reservoir.set(i, el._1);
+                }
+            }
+            t++;
+        }
+        return reservoir;
     }
 
 }
