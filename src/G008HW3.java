@@ -11,9 +11,6 @@ import java.util.concurrent.Semaphore;
 
 public class G008HW3 {
 
-    // After how many items should we stop?
-    // public static final int THRESHOLD = 1000000;
-
     public static void main(String[] args) throws Exception {
         if (args.length != 5) {
             throw new IllegalArgumentException("USAGE: number of items, frequency of threshold, accuracy parameter, confidence parameter, port number");
@@ -75,12 +72,11 @@ public class G008HW3 {
 
         long[] streamLength = new long[1]; // Stream length (an array to be passed by reference)
         streamLength[0] = 0L;
-        //array of a JavaPairRDD<Long, Long> to store the stream of items
+        // Array of a JavaPairRDD<Long, Long> to store the stream of items
         JavaPairRDD<Long, Long>[] fullStream = new JavaPairRDD[1];
         ArrayList<Tuple2<Long, Long>> trueFrequentItems = new ArrayList<>(); // True Frequent Items
         ArrayList<Long> reservoirSampling = new ArrayList<>(); // Reservoir Sampling
         Hashtable<Long, Long> stickySampling = new Hashtable<>(); // epsilon-AFI with Sticky Sampling
-        // HashMap<Long, Long> histogram = new HashMap<>(); // Hash Table for the distinct elements
 
         // CODE TO PROCESS AN UNBOUNDED STREAM OF DATA IN BATCHES
         sc.socketTextStream("algo.dei.unipd.it", portExp, StorageLevels.MEMORY_AND_DISK)
@@ -105,10 +101,6 @@ public class G008HW3 {
 
                         fullStream[0].count(); // Force the computation of the full stream to synchronize the operations
 
-                        // If we wanted, here we could run some additional code on the global histogram
-                      /*  if (batchSize > 0) {
-                            System.out.println("Batch size at time [" + time + "] is: " + batchSize);
-                        }*/
                         if (streamLength[0] >= n) {
                             stoppingSemaphore.release();
                         }
@@ -117,11 +109,8 @@ public class G008HW3 {
 
         // MANAGING STREAMING SPARK CONTEXT
 
-        //System.out.println("Starting streaming engine");
         sc.start();
-        //System.out.println("Waiting for shutdown condition");
         stoppingSemaphore.acquire();
-        //System.out.println("Stopping the streaming engine");
 
         // IMPLEMENTING THE ALGORITHMS
 
@@ -129,9 +118,6 @@ public class G008HW3 {
         reservoirSampling = reservoirSampling(fullStream[0], phi);
         stickySampling = stickySampling(fullStream[0], epsilon, delta, phi, streamLength[0]);
 
-
-
-        //TODO: ask if we have to print unique items or all in trueFrequentItems
         // True Frequent Items with the threshold phi
         trueFrequentItems.sort(Comparator.comparingLong(Tuple2::_2));
         System.out.println("Number of true frequent items = " + trueFrequentItems.size());
@@ -140,7 +126,6 @@ public class G008HW3 {
             System.out.println(item._1());
         }
 
-
         // Reservoir Sampling
         reservoirSampling.sort(Comparator.comparingLong(Long::longValue));
         System.out.println("Reservoir Sampling:");
@@ -148,9 +133,7 @@ public class G008HW3 {
             System.out.println(item);
         }
 
-
         // epsilon-AFI computed with Sticky Sampling
-        // sort hashtable by increasing value
         ArrayList<Tuple2<Long, Long>> l = new ArrayList<>();
         stickySampling.forEach((k, v) -> l.add(new Tuple2<>(k, v)));
         l.sort(Comparator.comparingLong(Tuple2::_2));
@@ -164,17 +147,6 @@ public class G008HW3 {
         // to stop "gracefully", meaning that any outstanding work
         // will be done.
         sc.stop(false, false);
-        //System.out.println("Streaming engine stopped");
-
-        // COMPUTE AND PRINT FINAL STATISTICS
-        //System.out.println("Number of items processed = " + streamLength[0]);
-        // System.out.println("Number of distinct items = " + histogram.size());
-        /*System.out.println("Histogram = " + histogram);
-        long max = 0L;
-        for (Long key : histogram.keySet()) {
-            if (key > max) {max = key;}
-        }
-        System.out.println("Largest item = " + max);*/
     }
 
     /**
@@ -247,6 +219,5 @@ public class G008HW3 {
         S.entrySet().removeIf(entry -> entry.getValue() < (phi - epsilon) * streamLength);
         return S;
     }
-
 }
 
