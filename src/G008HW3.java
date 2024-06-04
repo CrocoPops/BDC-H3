@@ -1,13 +1,13 @@
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.StorageLevels;
-import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.streaming.Durations;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import scala.Tuple2;
 
 import java.util.*;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class G008HW3 {
 
@@ -73,8 +73,9 @@ public class G008HW3 {
         long[] streamLength = new long[1]; // Stream length (an array to be passed by reference)
         streamLength[0] = 0L;
         // Array of a JavaPairRDD<Long, Long> to store the stream of items
-        JavaPairRDD<Long, Long>[] fullStream = new JavaPairRDD[1];
-        ArrayList<Tuple2<Long, Long>> trueFrequentItems = new ArrayList<>(); // True Frequent Items
+
+
+        AtomicReference<Hashtable<Long, Long>> counterItems = new AtomicReference<>(new Hashtable<>()); // Counter of the items for True Frequent Items
         ArrayList<Long> reservoirSampling = new ArrayList<>(); // Reservoir Sampling
         Hashtable<Long, Long> stickySampling = new Hashtable<>(); // epsilon-AFI with Sticky Sampling
 
@@ -87,24 +88,32 @@ public class G008HW3 {
                     // this is working on the batch at time `time`.
                     if (streamLength[0] < n) {
                         long batchSize = batch.count();
+                        long prevStreamLength = streamLength[0];
                         streamLength[0] += batchSize;
-                        JavaPairRDD<Long, Long> batchItems = batch
-                                .mapToPair(s -> new Tuple2<>(Long.parseLong(s), 1L))
-                                .persist(StorageLevel.MEMORY_AND_DISK());
 
-                        // Add batch to the full stream
-                        if (fullStream[0] == null) {
-                            fullStream[0] = batchItems.persist(StorageLevel.MEMORY_AND_DISK());
-                        } else {
-                            fullStream[0] = fullStream[0].union(batchItems).persist(StorageLevel.MEMORY_AND_DISK());
-                        }
+                        // Extract the distinct items from the batch
+                        List<Long> batchItems = batch
+                                .map(Long::parseLong)
+                                .collect();
 
-                        fullStream[0].count(); // Force the computation of the full stream to synchronize the operations
 
-                        if (streamLength[0] >= n) {
+
+                        // if streamLength[0] is greater than n, maintain only the first n - prevStreamLength elements
+                        if(streamLength[0] >= n) {
                             stoppingSemaphore.release();
+                            int offset = (int) (n - prevStreamLength);
+                            batchItems = batchItems.subList(0, offset);
                         }
+
+                        // Implementing the algorithms
+                       counterItems.set(trueFrequentItems(batchItems, counterItems.get()));
+
                     }
+
+
+
+
+
                 });
 
         // MANAGING STREAMING SPARK CONTEXT
@@ -112,20 +121,30 @@ public class G008HW3 {
         sc.start();
         stoppingSemaphore.acquire();
 
-        // IMPLEMENTING THE ALGORITHMS
+        // Extracting the results
+        System.out.println("Size of data structure to compute true frequent items = " + counterItems.get().size());
 
-        trueFrequentItems = trueFrequentItems(fullStream[0], phi, streamLength[0]);
-        reservoirSampling = reservoirSampling(fullStream[0], phi);
-        stickySampling = stickySampling(fullStream[0], epsilon, delta, phi, streamLength[0]);
+        // Compute true frequent items
+        List<Tuple2<Long, Long>> trueFrequentItems = new ArrayList<>();
+        // Remove items with frequency less than phi * n
+        counterItems.get().entrySet().removeIf(entry -> entry.getValue() < phi * n);
+        // Add items with frequency
+        counterItems.get().forEach((k, v) -> trueFrequentItems.add(new Tuple2<>(k, v)));
 
-        // True Frequent Items with the threshold phi
-        trueFrequentItems.sort(Comparator.comparingLong(Tuple2::_2));
         System.out.println("Number of true frequent items = " + trueFrequentItems.size());
-        System.out.println("True Frequent Items:");
+        System.out.println("True Frequent Items: ");
+        trueFrequentItems.sort(Comparator.comparingLong(Tuple2::_1)); // sort the items by key
         for(Tuple2<Long, Long> item : trueFrequentItems) {
             System.out.println(item._1());
         }
 
+        /*trueFrequentItems = trueFrequentItems(fullStream[0], phi, streamLength[0]);
+        reservoirSampling = reservoirSampling(fullStream[0], phi);
+        stickySampling = stickySampling(fullStream[0], epsilon, delta, phi, streamLength[0]);*/
+
+
+
+/*
         // Reservoir Sampling
         reservoirSampling.sort(Comparator.comparingLong(Long::longValue));
         System.out.println("Reservoir Sampling:");
@@ -140,7 +159,7 @@ public class G008HW3 {
         System.out.println("Number of sticky sampling items = " + l.size());
         System.out.println("Sticky Sampling Items:");
         for(Tuple2<Long, Long> item : l)
-            System.out.println(item._1());
+            System.out.println(item._1());*/
 
         // NOTE: You will see some data being processed even after the
         // shutdown command has been issued: This is because we are asking
@@ -151,18 +170,18 @@ public class G008HW3 {
 
     /**
      * True Frequent Items Algorithm
-     * @param stream - stream of items
-     * @param phi - frequency threshold
-     * @param streamLength - length of the stream
-     * @return - list of true frequent items
+     * @param batchItems- stream of items of the current batch
+     * @param counterItems - hashtable of items with their frequency
+     * @return - hashtable of counterItems
      */
-    public static ArrayList<Tuple2<Long, Long>> trueFrequentItems(JavaPairRDD<Long, Long> stream, float phi, long streamLength) {
-        // Round 1
-        JavaPairRDD<Long, Long> frequentItems = stream
-                .reduceByKey(Long::sum)
-                .filter(s -> s._2 >= phi * streamLength);
-        // Return the list of frequent items
-        return new ArrayList<>(frequentItems.collect());
+    public static Hashtable<Long, Long> trueFrequentItems(List<Long> batchItems, Hashtable<Long, Long> counterItems) {
+        for(Long item: batchItems) {
+            if(counterItems.contains(item))
+                counterItems.replace(item, counterItems.get(item) + 1);
+            else
+                counterItems.put(item, 1L);
+        }
+        return counterItems;
     }
 
     /**
