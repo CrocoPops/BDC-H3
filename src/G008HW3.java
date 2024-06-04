@@ -76,7 +76,7 @@ public class G008HW3 {
 
 
         AtomicReference<Hashtable<Long, Long>> counterItems = new AtomicReference<>(new Hashtable<>()); // Counter of the items for True Frequent Items
-        ArrayList<Long> reservoirSampling = new ArrayList<>(); // Reservoir Sampling
+        AtomicReference<ArrayList<Long>> reservoirSampling = new AtomicReference<>(new ArrayList<>()); // Reservoir Sampling
         Hashtable<Long, Long> stickySampling = new Hashtable<>(); // epsilon-AFI with Sticky Sampling
 
         // CODE TO PROCESS AN UNBOUNDED STREAM OF DATA IN BATCHES
@@ -106,8 +106,8 @@ public class G008HW3 {
                         }
 
                         // Implementing the algorithms
-                       counterItems.set(trueFrequentItems(batchItems, counterItems.get()));
-
+                        counterItems.set(trueFrequentItems(batchItems, counterItems.get()));
+                        reservoirSampling.set(reservoirSampling(batchItems, reservoirSampling.get(), phi, prevStreamLength));
                     }
 
 
@@ -121,28 +121,36 @@ public class G008HW3 {
         sc.start();
         stoppingSemaphore.acquire();
 
-        // Extracting the results
+        // True Frequent Items
         System.out.println("Size of data structure to compute true frequent items = " + counterItems.get().size());
-
-        // Compute true frequent items
-        List<Tuple2<Long, Long>> trueFrequentItems = new ArrayList<>();
+        List<Long> trueFrequentItems = new ArrayList<>();
         // Remove items with frequency less than phi * n
         counterItems.get().entrySet().removeIf(entry -> entry.getValue() < phi * n);
         // Add items with frequency
-        counterItems.get().forEach((k, v) -> trueFrequentItems.add(new Tuple2<>(k, v)));
+        counterItems.get().forEach((k, v) -> trueFrequentItems.add(k));
 
         System.out.println("Number of true frequent items = " + trueFrequentItems.size());
         System.out.println("True Frequent Items: ");
-        trueFrequentItems.sort(Comparator.comparingLong(Tuple2::_1)); // sort the items by key
-        for(Tuple2<Long, Long> item : trueFrequentItems) {
-            System.out.println(item._1());
+        trueFrequentItems.sort(Comparator.comparingLong(Long::longValue)); // sort the list
+        for(long item : trueFrequentItems) {
+            System.out.println(item);
         }
 
-        /*trueFrequentItems = trueFrequentItems(fullStream[0], phi, streamLength[0]);
-        reservoirSampling = reservoirSampling(fullStream[0], phi);
-        stickySampling = stickySampling(fullStream[0], epsilon, delta, phi, streamLength[0]);*/
-
-
+        // Reservoir Sampling
+        System.out.println("Size m of the Reservoir sample = " + (int) Math.ceil(1 / phi));
+        // Remove duplicates by converting to a Set and back to a List
+        Set<Long> uniqueItemsSet = new HashSet<>(reservoirSampling.get());
+        ArrayList<Long> reservoirSamplingUnique = new ArrayList<>(uniqueItemsSet);
+        System.out.println("Number of estimated frequent items = " + reservoirSamplingUnique.size());
+        reservoirSamplingUnique.sort(Comparator.comparingLong(Long::longValue));
+        System.out.println("Reservoir Sampling:"); //TODO: Here I print the unique items. Check if the prof wants the unique ones or all
+        for(Long item : reservoirSamplingUnique) {
+            System.out.print(item + " ");
+            if(trueFrequentItems.contains(item))
+                System.out.println("+");
+            else
+                System.out.println("-");
+        }
 
 /*
         // Reservoir Sampling
@@ -186,24 +194,23 @@ public class G008HW3 {
 
     /**
      * Reservoir Sampling Algorithm
-     * @param stream - stream of items
+     * @param batchItems - stream of items of current batch
+     * @param reservoir - list of m-sampled items
      * @param phi - frequency threshold used to compute m
+     * @param t - number of elements received until now
      * @return - list of m-sampled items
      */
-    public static ArrayList<Long> reservoirSampling(JavaPairRDD<Long, Long> stream, float phi) {
+    public static ArrayList<Long> reservoirSampling(List<Long> batchItems, ArrayList<Long> reservoir,  float phi, long t) {
         int m = (int) Math.ceil(1 / phi);
-        ArrayList<Long> reservoir = new ArrayList<>();
-        int t = 0;
-        List<Tuple2<Long, Long>> elements = stream.collect();
 
-        for(Tuple2<Long, Long> el : elements) {
+        for(long item : batchItems) {
             if (reservoir.size() < m) {
-                reservoir.add(el._1);
+                reservoir.add(item);
             } else {
                 Random random = new Random();
                 if (random.nextFloat() <= (float) m / t) {
                     int i = random.nextInt(m);
-                    reservoir.set(i, el._1);
+                    reservoir.set(i, item);
                 }
             }
             t++;
