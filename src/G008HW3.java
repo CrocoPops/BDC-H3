@@ -1,9 +1,7 @@
 import org.apache.spark.SparkConf;
-import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.StorageLevels;
 import org.apache.spark.streaming.Durations;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
-import scala.Tuple2;
 
 import java.util.*;
 import java.util.concurrent.Semaphore;
@@ -77,7 +75,7 @@ public class G008HW3 {
 
         AtomicReference<Hashtable<Long, Long>> counterItems = new AtomicReference<>(new Hashtable<>()); // Counter of the items for True Frequent Items
         AtomicReference<ArrayList<Long>> reservoirSampling = new AtomicReference<>(new ArrayList<>()); // Reservoir Sampling
-        Hashtable<Long, Long> stickySampling = new Hashtable<>(); // epsilon-AFI with Sticky Sampling
+        AtomicReference<Hashtable<Long, Long>> stickySampling = new AtomicReference<>(new Hashtable<>()); // epsilon-AFI with Sticky Sampling
 
         // CODE TO PROCESS AN UNBOUNDED STREAM OF DATA IN BATCHES
         sc.socketTextStream("algo.dei.unipd.it", portExp, StorageLevels.MEMORY_AND_DISK)
@@ -108,6 +106,8 @@ public class G008HW3 {
                         // Implementing the algorithms
                         counterItems.set(trueFrequentItems(batchItems, counterItems.get()));
                         reservoirSampling.set(reservoirSampling(batchItems, reservoirSampling.get(), phi, prevStreamLength));
+                        stickySampling.set(stickySampling(batchItems, stickySampling.get(), epsilon, delta, phi, n));
+
                     }
 
 
@@ -151,6 +151,29 @@ public class G008HW3 {
             else
                 System.out.println("-");
         }
+
+        // Sticky Sampling
+        System.out.println("Size of Hash Table= " + stickySampling.get().size()); //TODO: Prof wants the size of the Hash table after having removed the items with low frequency or wants all items?
+
+        // Remove items with frequency less than (phi - epsilon) * n
+        stickySampling.get().entrySet().removeIf(entry -> entry.getValue() < (phi - epsilon) * n);
+        System.out.println("Number of sticky sampling items = " + stickySampling.get().size());
+
+        // Sort the items by key using an array list of tuples
+        ArrayList<Long> stickySamplingSorted = new ArrayList<>();
+        stickySampling.get().forEach((k, v) -> stickySamplingSorted.add(k));
+        stickySamplingSorted.sort(Comparator.comparingLong(Long::longValue));
+
+        System.out.println("Sticky Sampling Items:");
+        for(Long item : stickySamplingSorted) {
+            System.out.print(item + " ");
+            if(trueFrequentItems.contains(item))
+                System.out.println("+");
+            else
+                System.out.println("-");
+        }
+
+
 
 /*
         // Reservoir Sampling
@@ -220,30 +243,26 @@ public class G008HW3 {
 
     /**
      * epsilon-AFI with Sticky Sampling Algorithm
-     * @param stream - stream of items
+     * @param batchItems - batch of items
      * @param epsilon - accuracy parameter
      * @param delta - confidence parameter
      * @param phi - frequency threshold
-     * @param streamLength - length of the stream
+     * @param n - length of the stream
      * @return - hashtable of frequent items with (phi - epsilon) * streamLength probability
      */
-    public static Hashtable<Long, Long> stickySampling(JavaPairRDD<Long, Long> stream, float epsilon, float delta, float phi, long streamLength) {
-        Hashtable<Long, Long> S = new Hashtable<>();
+    public static Hashtable<Long, Long> stickySampling(List<Long> batchItems, Hashtable<Long, Long> stickySampling, float epsilon, float delta, float phi, long n) {
         double r = Math.log(1 / (delta * phi)) / epsilon;
-        List<Tuple2<Long, Long>> elements = stream.collect();
 
-        for(Tuple2<Long, Long> el : elements) {
+        for(long item : batchItems) {
             Random random = new Random();
-            if (S.containsKey(el._1()))
-                S.replace(el._1(), el._2(), el._2() + 1);
+            if (stickySampling.containsKey(item))
+                stickySampling.replace(item, stickySampling.get(item) + 1);
             else
-                if(random.nextDouble() <= r / streamLength)
-                    S.put(el._1(), el._2());
+                if(random.nextDouble() <= r / n)
+                    stickySampling.put(item, 1L);
         }
 
-        // drop items with frequency less than (phi - epsilon) * streamLength
-        S.entrySet().removeIf(entry -> entry.getValue() < (phi - epsilon) * streamLength);
-        return S;
+        return stickySampling;
     }
 }
 
