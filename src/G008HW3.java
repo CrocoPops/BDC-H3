@@ -1,11 +1,11 @@
+import com.google.common.util.concurrent.AtomicDouble;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.StorageLevels;
 import org.apache.spark.streaming.Durations;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
-
 import java.util.*;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class G008HW3 {
 
@@ -44,25 +44,27 @@ public class G008HW3 {
         // INPUT READING
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
+
+        System.out.println("INPUT PROPERTIES");
         int n = Integer.parseInt(args[0]);
-        System.out.println("Number of items = " + n);
+        System.out.print("n = " + n);
         float phi = Float.parseFloat(args[1]);
         if(phi <= 0 || phi >= 1) {
             throw new IllegalArgumentException("The phi parameter must be in the range (0, 1)");
         }
-        System.out.println("Phi = " + phi);
+        System.out.print(" phi = " + phi);
         float epsilon = Float.parseFloat(args[2]);
         if(epsilon <= 0 || epsilon >= 1) {
             throw new IllegalArgumentException("The epsilon parameter must be in the range (0, 1)");
         }
-        System.out.println("Epsilon = " + epsilon);
+        System.out.print(" epsilon = " + epsilon);
         float delta = Float.parseFloat(args[3]);
         if(delta <= 0 || delta >= 1) {
             throw new IllegalArgumentException("The delta parameter must be in the range (0, 1)");
         }
-        System.out.println("Delta = " + delta);
+        System.out.print(" delta = " + delta);
         int portExp = Integer.parseInt(args[4]);
-        System.out.println("Receiving data from port = " + portExp);
+        System.out.println(" port = " + portExp);
 
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
         // DEFINING THE REQUIRED DATA STRUCTURES TO MAINTAIN THE STATE OF THE STREAM
@@ -73,9 +75,17 @@ public class G008HW3 {
         // Array of a JavaPairRDD<Long, Long> to store the stream of items
 
 
-        AtomicReference<Hashtable<Long, Long>> counterItems = new AtomicReference<>(new Hashtable<>()); // Counter of the items for True Frequent Items
-        AtomicReference<ArrayList<Long>> reservoirSampling = new AtomicReference<>(new ArrayList<>()); // Reservoir Sampling
-        AtomicReference<Hashtable<Long, Long>> stickySampling = new AtomicReference<>(new Hashtable<>()); // epsilon-AFI with Sticky Sampling
+        // AtomicReference<Hashtable<Long, Long>> counterItems = new AtomicReference<>(new Hashtable<>()); // Counter of the items for True Frequent Items
+        // AtomicReference<ArrayList<Long>> reservoirSampling = new AtomicReference<>(new ArrayList<>()); // Reservoir Sampling
+        // AtomicReference<Hashtable<Long, Long>> stickySampling = new AtomicReference<>(new Hashtable<>()); // epsilon-AFI with Sticky Sampling
+        List<Long> stream[] = new List[1];
+        stream[0] = new ArrayList<>();
+        Hashtable<Long, Long> counterItems[] = new Hashtable[1];
+        ArrayList<Long> reservoirSampling[] = new ArrayList[1];
+        Hashtable<Long, Long> stickySampling[] = new Hashtable[1];
+        counterItems[0] = new Hashtable<>();
+        reservoirSampling[0] = new ArrayList<>();
+        stickySampling[0] = new Hashtable<>();
 
         // CODE TO PROCESS AN UNBOUNDED STREAM OF DATA IN BATCHES
         sc.socketTextStream("algo.dei.unipd.it", portExp, StorageLevels.MEMORY_AND_DISK)
@@ -88,46 +98,52 @@ public class G008HW3 {
                         long batchSize = batch.count();
                         long prevStreamLength = streamLength[0];
                         streamLength[0] += batchSize;
-
                         // Extract the distinct items from the batch
                         List<Long> batchItems = batch
                                 .map(Long::parseLong)
                                 .collect();
-
-
-
                         // if streamLength[0] is greater than n, maintain only the first n - prevStreamLength elements
                         if(streamLength[0] >= n) {
-                            stoppingSemaphore.release();
                             int offset = (int) (n - prevStreamLength);
                             batchItems = batchItems.subList(0, offset);
+                            batchItems.forEach(item -> stream[0].add(item));
                         }
-
                         // Implementing the algorithms
-                        counterItems.set(trueFrequentItems(batchItems, counterItems.get()));
-                        reservoirSampling.set(reservoirSampling(batchItems, reservoirSampling.get(), phi, prevStreamLength));
-                        stickySampling.set(stickySampling(batchItems, stickySampling.get(), epsilon, delta, phi, n));
+                        if(batchSize > 0) {
+                            // batchItems.forEach(item -> stream[0].add(item));
+                            // True Frequent Items
+                            Hashtable<Long, Long> trueFrequent = trueFrequentItems(batchItems);
+                            for(Map.Entry<Long, Long> entry : trueFrequent.entrySet()) {
+                                counterItems[0].merge(entry.getKey(), entry.getValue(), Long::sum);
+                            }
 
+                            ArrayList<Long> reservoir = reservoirSampling(batchItems, phi, streamLength[0]);
+                            reservoirSampling[0].addAll(reservoir);
+
+                            Hashtable<Long, Long> stickySample = stickySampling(batchItems, epsilon, delta, phi, streamLength[0]);
+                            for(Map.Entry<Long, Long> entry : stickySample.entrySet()) {
+                                stickySampling[0].merge(entry.getKey(), entry.getValue(), Long::sum);
+                            }
+                        }
+                        if(streamLength[0] >= n) {
+                            stoppingSemaphore.release();
+                        }
                     }
-
-
-
-
-
                 });
 
         // MANAGING STREAMING SPARK CONTEXT
-
         sc.start();
         stoppingSemaphore.acquire();
 
         // True Frequent Items
-        System.out.println("Size of data structure to compute true frequent items = " + counterItems.get().size());
+        System.out.println("EXACT ALGORITHM");
+        // return sum of the values of the map
+        System.out.println("Number of items in the data structure = " + counterItems[0].size());
         List<Long> trueFrequentItems = new ArrayList<>();
         // Remove items with frequency less than phi * n
-        counterItems.get().entrySet().removeIf(entry -> entry.getValue() < phi * n);
+        counterItems[0].entrySet().removeIf(entry -> entry.getValue() < phi * n);
         // Add items with frequency
-        counterItems.get().forEach((k, v) -> trueFrequentItems.add(k));
+        counterItems[0].forEach((k, v) -> trueFrequentItems.add(k));
 
         System.out.println("Number of true frequent items = " + trueFrequentItems.size());
         System.out.println("True Frequent Items: ");
@@ -137,13 +153,14 @@ public class G008HW3 {
         }
 
         // Reservoir Sampling
-        System.out.println("Size m of the Reservoir sample = " + (int) Math.ceil(1 / phi));
+        System.out.println("RESERVOIR SAMPLING");
+        System.out.println("Size m of the sample = " + (int) Math.ceil(1 / phi));
         // Remove duplicates by converting to a Set and back to a List
-        Set<Long> uniqueItemsSet = new HashSet<>(reservoirSampling.get());
+        Set<Long> uniqueItemsSet = new HashSet<>(reservoirSampling[0]);
         ArrayList<Long> reservoirSamplingUnique = new ArrayList<>(uniqueItemsSet);
         System.out.println("Number of estimated frequent items = " + reservoirSamplingUnique.size());
         reservoirSamplingUnique.sort(Comparator.comparingLong(Long::longValue));
-        System.out.println("Reservoir Sampling:"); //TODO: Here I print the unique items. Check if the prof wants the unique ones or all
+        System.out.println("Estimated frequent items:");
         for(Long item : reservoirSamplingUnique) {
             System.out.print(item + " ");
             if(trueFrequentItems.contains(item))
@@ -153,18 +170,19 @@ public class G008HW3 {
         }
 
         // Sticky Sampling
-        System.out.println("Size of Hash Table= " + stickySampling.get().size()); //TODO: Prof wants the size of the Hash table after having removed the items with low frequency or wants all items?
+        System.out.println("STICKY SAMPLING");
+        System.out.println("Number of items in the Hash Table = " + stickySampling[0].size()); //TODO: Prof wants the size of the Hash table after having removed the items with low frequency or wants all items?
 
         // Remove items with frequency less than (phi - epsilon) * n
-        stickySampling.get().entrySet().removeIf(entry -> entry.getValue() < (phi - epsilon) * n);
-        System.out.println("Number of sticky sampling items = " + stickySampling.get().size());
+        stickySampling[0].entrySet().removeIf(entry -> entry.getValue() < (phi - epsilon) * n);
+        System.out.println("Number of estimated frequent items = " + stickySampling[0].size());
 
+        System.out.println("Estimated frequent items:");
         // Sort the items by key using an array list of tuples
         ArrayList<Long> stickySamplingSorted = new ArrayList<>();
-        stickySampling.get().forEach((k, v) -> stickySamplingSorted.add(k));
+        stickySampling[0].forEach((k, v) -> stickySamplingSorted.add(k));
         stickySamplingSorted.sort(Comparator.comparingLong(Long::longValue));
 
-        System.out.println("Sticky Sampling Items:");
         for(Long item : stickySamplingSorted) {
             System.out.print(item + " ");
             if(trueFrequentItems.contains(item))
@@ -172,25 +190,6 @@ public class G008HW3 {
             else
                 System.out.println("-");
         }
-
-
-
-/*
-        // Reservoir Sampling
-        reservoirSampling.sort(Comparator.comparingLong(Long::longValue));
-        System.out.println("Reservoir Sampling:");
-        for(Long item : reservoirSampling) {
-            System.out.println(item);
-        }
-
-        // epsilon-AFI computed with Sticky Sampling
-        ArrayList<Tuple2<Long, Long>> l = new ArrayList<>();
-        stickySampling.forEach((k, v) -> l.add(new Tuple2<>(k, v)));
-        l.sort(Comparator.comparingLong(Tuple2::_2));
-        System.out.println("Number of sticky sampling items = " + l.size());
-        System.out.println("Sticky Sampling Items:");
-        for(Tuple2<Long, Long> item : l)
-            System.out.println(item._1());*/
 
         // NOTE: You will see some data being processed even after the
         // shutdown command has been issued: This is because we are asking
@@ -202,12 +201,12 @@ public class G008HW3 {
     /**
      * True Frequent Items Algorithm
      * @param batchItems- stream of items of the current batch
-     * @param counterItems - hashtable of items with their frequency
-     * @return - hashtable of counterItems
+     * @return counterItems - map of counterItems
      */
-    public static Hashtable<Long, Long> trueFrequentItems(List<Long> batchItems, Hashtable<Long, Long> counterItems) {
+    public static Hashtable<Long, Long> trueFrequentItems(List<Long> batchItems) {
+        Hashtable<Long, Long> counterItems = new Hashtable<>();
         for(Long item: batchItems) {
-            if(counterItems.contains(item))
+            if(counterItems.containsKey(item))
                 counterItems.replace(item, counterItems.get(item) + 1);
             else
                 counterItems.put(item, 1L);
@@ -218,20 +217,19 @@ public class G008HW3 {
     /**
      * Reservoir Sampling Algorithm
      * @param batchItems - stream of items of current batch
-     * @param reservoir - list of m-sampled items
      * @param phi - frequency threshold used to compute m
      * @param t - number of elements received until now
      * @return - list of m-sampled items
      */
-    public static ArrayList<Long> reservoirSampling(List<Long> batchItems, ArrayList<Long> reservoir,  float phi, long t) {
+    public static ArrayList<Long> reservoirSampling(List<Long> batchItems, float phi, long t) {
+        ArrayList<Long> reservoir = new ArrayList<>();
+        Random random = new Random();
         int m = (int) Math.ceil(1 / phi);
-
         for(long item : batchItems) {
             if (reservoir.size() < m) {
                 reservoir.add(item);
             } else {
-                Random random = new Random();
-                if (random.nextFloat() <= (float) m / t) {
+                if (random.nextDouble() <= (double) m / t) {
                     int i = random.nextInt(m);
                     reservoir.set(i, item);
                 }
@@ -248,20 +246,19 @@ public class G008HW3 {
      * @param delta - confidence parameter
      * @param phi - frequency threshold
      * @param n - length of the stream
-     * @return - hashtable of frequent items with (phi - epsilon) * streamLength probability
+     * @return stickySampling - hashtable of frequent items with (phi - epsilon) * streamLength probability
      */
-    public static Hashtable<Long, Long> stickySampling(List<Long> batchItems, Hashtable<Long, Long> stickySampling, float epsilon, float delta, float phi, long n) {
+    public static Hashtable<Long, Long> stickySampling(List<Long> batchItems, float epsilon, float delta, float phi, long n) {
+        Hashtable<Long, Long> stickySampling = new Hashtable<>();
+        Random random = new Random();
         double r = Math.log(1 / (delta * phi)) / epsilon;
-
         for(long item : batchItems) {
-            Random random = new Random();
             if (stickySampling.containsKey(item))
                 stickySampling.replace(item, stickySampling.get(item) + 1);
             else
                 if(random.nextDouble() <= r / n)
                     stickySampling.put(item, 1L);
         }
-
         return stickySampling;
     }
 }
