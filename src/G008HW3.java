@@ -171,8 +171,7 @@ public class G008HW3 {
 
         // Sticky Sampling
         System.out.println("STICKY SAMPLING");
-        System.out.println("Number of items in the Hash Table = " + stickySampling[0].size()); //TODO: Prof wants the size of the Hash table after having removed the items with low frequency or wants all items?
-
+        System.out.println("Number of items in the Hash Table = " + stickySampling[0].size());
         // Remove items with frequency less than (phi - epsilon) * n
         stickySampling[0].entrySet().removeIf(entry -> entry.getValue() < (phi - epsilon) * n);
         System.out.println("Number of estimated frequent items = " + stickySampling[0].size());
