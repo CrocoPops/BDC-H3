@@ -98,6 +98,7 @@ public class G008HW3 {
                         if(streamLength[0] >= n) {
                             int offset = (int) (n - prevStreamLength);
                             batchItems = batchItems.subList(0, offset);
+                            streamLength[0] = n;
                         }
                         // Implementing the algorithms
                         if(batchSize > 0) {
