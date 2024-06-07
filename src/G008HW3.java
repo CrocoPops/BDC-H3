@@ -71,18 +71,10 @@ public class G008HW3 {
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
         long[] streamLength = new long[1]; // Stream length (an array to be passed by reference)
-        streamLength[0] = 0L;
-        // Array of a JavaPairRDD<Long, Long> to store the stream of items
-
-
-        // AtomicReference<Hashtable<Long, Long>> counterItems = new AtomicReference<>(new Hashtable<>()); // Counter of the items for True Frequent Items
-        // AtomicReference<ArrayList<Long>> reservoirSampling = new AtomicReference<>(new ArrayList<>()); // Reservoir Sampling
-        // AtomicReference<Hashtable<Long, Long>> stickySampling = new AtomicReference<>(new Hashtable<>()); // epsilon-AFI with Sticky Sampling
-        List<Long> stream[] = new List[1];
-        stream[0] = new ArrayList<>();
         Hashtable<Long, Long> counterItems[] = new Hashtable[1];
         ArrayList<Long> reservoirSampling[] = new ArrayList[1];
         Hashtable<Long, Long> stickySampling[] = new Hashtable[1];
+        streamLength[0] = 0L;
         counterItems[0] = new Hashtable<>();
         reservoirSampling[0] = new ArrayList<>();
         stickySampling[0] = new Hashtable<>();
@@ -106,24 +98,18 @@ public class G008HW3 {
                         if(streamLength[0] >= n) {
                             int offset = (int) (n - prevStreamLength);
                             batchItems = batchItems.subList(0, offset);
-                            batchItems.forEach(item -> stream[0].add(item));
                         }
                         // Implementing the algorithms
                         if(batchSize > 0) {
-                            // batchItems.forEach(item -> stream[0].add(item));
                             // True Frequent Items
                             Hashtable<Long, Long> trueFrequent = trueFrequentItems(batchItems);
                             for(Map.Entry<Long, Long> entry : trueFrequent.entrySet()) {
                                 counterItems[0].merge(entry.getKey(), entry.getValue(), Long::sum);
                             }
-
-                            ArrayList<Long> reservoir = reservoirSampling(batchItems, phi, streamLength[0]);
-                            reservoirSampling[0].addAll(reservoir);
-
-                            Hashtable<Long, Long> stickySample = stickySampling(batchItems, epsilon, delta, phi, streamLength[0]);
-                            for(Map.Entry<Long, Long> entry : stickySample.entrySet()) {
-                                stickySampling[0].merge(entry.getKey(), entry.getValue(), Long::sum);
-                            }
+                            // Reservoir Sampling
+                            reservoirSampling(batchItems, reservoirSampling[0], phi, streamLength[0]);
+                            // Sticky Sampling
+                            stickySampling(batchItems, stickySampling[0], epsilon, delta, phi, streamLength[0]);
                         }
                         if(streamLength[0] >= n) {
                             stoppingSemaphore.release();
@@ -216,12 +202,11 @@ public class G008HW3 {
     /**
      * Reservoir Sampling Algorithm
      * @param batchItems - stream of items of current batch
+     * @param reservoir - list of m-sampled items
      * @param phi - frequency threshold used to compute m
      * @param t - number of elements received until now
-     * @return - list of m-sampled items
      */
-    public static ArrayList<Long> reservoirSampling(List<Long> batchItems, float phi, long t) {
-        ArrayList<Long> reservoir = new ArrayList<>();
+    public static void reservoirSampling(List<Long> batchItems, ArrayList<Long> reservoir, float phi, long t) {
         Random random = new Random();
         int m = (int) Math.ceil(1 / phi);
         for(long item : batchItems) {
@@ -235,7 +220,6 @@ public class G008HW3 {
             }
             t++;
         }
-        return reservoir;
     }
 
     /**
@@ -245,10 +229,8 @@ public class G008HW3 {
      * @param delta - confidence parameter
      * @param phi - frequency threshold
      * @param n - length of the stream
-     * @return stickySampling - hashtable of frequent items with (phi - epsilon) * streamLength probability
      */
-    public static Hashtable<Long, Long> stickySampling(List<Long> batchItems, float epsilon, float delta, float phi, long n) {
-        Hashtable<Long, Long> stickySampling = new Hashtable<>();
+    public static void stickySampling(List<Long> batchItems, Hashtable<Long, Long> stickySampling, float epsilon, float delta, float phi, long n) {
         Random random = new Random();
         double r = Math.log(1 / (delta * phi)) / epsilon;
         for(long item : batchItems) {
@@ -258,7 +240,6 @@ public class G008HW3 {
                 if(random.nextDouble() <= r / n)
                     stickySampling.put(item, 1L);
         }
-        return stickySampling;
     }
 }
 
