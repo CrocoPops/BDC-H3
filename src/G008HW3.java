@@ -108,9 +108,9 @@ public class G008HW3 {
                                 counterItems[0].merge(entry.getKey(), entry.getValue(), Long::sum);
                             }
                             // Reservoir Sampling
-                            reservoirSampling(batchItems, reservoirSampling[0], phi, streamLength[0]);
+                            reservoirSampling(batchItems, reservoirSampling[0], phi, prevStreamLength);
                             // Sticky Sampling
-                            stickySampling(batchItems, stickySampling[0], epsilon, delta, phi, streamLength[0]);
+                            stickySampling(batchItems, stickySampling[0], epsilon, delta, phi, n);
                         }
                         if(streamLength[0] >= n) {
                             stoppingSemaphore.release();
